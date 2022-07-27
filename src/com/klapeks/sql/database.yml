@@ -1,0 +1,16 @@
+# What type of database do you want to use?
+# Valid values: YAML, MYSQL
+type: YAML
+
+# database name
+name: database_name
+
+# Database host address
+host: localhost
+# Database port
+port: 3306
+# Username to connect to the SQL database
+username: root
+# Password to connect to the SQL database
+password: root
+
