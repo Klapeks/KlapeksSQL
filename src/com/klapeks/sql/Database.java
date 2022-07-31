@@ -213,10 +213,8 @@ public abstract class Database {
 
 	public abstract <T> List<T> select(Class<T> table, Where where);
 	public <T> T selectOne(Class<T> table, Where where) {
-		System.out.println("Select one");
 		where.limit = 1;
 		List<T> list = select(table, where);
-		System.out.println(list);
 		if (list == null || list.isEmpty()) return null;
 		return list.get(0);
 	}
