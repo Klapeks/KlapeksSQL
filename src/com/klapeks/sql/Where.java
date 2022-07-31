@@ -38,4 +38,22 @@ public class Where implements Cloneable {
 		wh.limit = this.limit;
 		return wh;
 	}
+	
+	@Override
+	public boolean equals(Object obj) {
+		if (obj==null) return false;
+		if (!(obj instanceof Where)) return false;
+		Where where = (Where) obj;
+		if (where == this) return true;
+		if (where.placeholders.length!=this.placeholders.length) return false;
+		if (!where.query.equals(query)) return false;
+		for (int i = 0; i < where.placeholders.length; i++) {
+			if (!where.placeholders[i].equals(placeholders[i])) return false;
+		}
+		return true;
+	}
+	@Override
+	public int hashCode() {
+		return query.hashCode();
+	}
 }

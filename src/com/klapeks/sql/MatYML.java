@@ -2,6 +2,7 @@ package com.klapeks.sql;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -14,7 +15,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 
 import com.klapeks.db.Cfg;
-import com.klapeks.libs.Main;
+import com.klapeks.libs.bukkit.Main;
 import com.klapeks.sql.anno.Column;
 import com.klapeks.sql.anno.IfYaml;
 import com.klapeks.sql.anno.Table;
@@ -76,7 +77,10 @@ public class MatYML extends Database {
 			field.setAccessible(true);
 			try {
 				Object a = field.get(object);
-				cfg.set(key+"."+column.value(), a);
+				if (a instanceof List<?>) {
+					cfg.set(key+"."+column.value(), a);
+				}
+				else cfg.set(key+"."+column.value(), convertToDB(a));
 			} catch (Throwable e) {
 				e.printStackTrace();
 			}
@@ -98,7 +102,12 @@ public class MatYML extends Database {
 		if (list == null || list.isEmpty()) return null;
 		return list;
 	}
+	@Override
+	public boolean hasOne(Class<?> table, Where where) {
+		return false;
+	}
 	private <T> void parse(ConfigurationSection section, Class<T> clazz, List<T> addTo) {
+		if (section==null) return;
 		boolean b = false;
 		for (String key : section.getKeys(false)) {
 			if (!section.isConfigurationSection(key)) continue;
@@ -113,15 +122,22 @@ public class MatYML extends Database {
 	}
 
 	static <T> T generateFromSection(Class<T> clazz, ConfigurationSection section) {
+		if (section==null) return null;
 		try {
-			T t = clazz.getConstructor().newInstance();
+			Constructor<T> constr = clazz.getConstructor();
+			constr.setAccessible(true);
+			T object = constr.newInstance();
 			for (Field field : clazz.getDeclaredFields()) {
 				Column column = field.getAnnotation(Column.class);
 				if (column==null) continue;
 				field.setAccessible(true);
-				field.set(t, section.get(column.value()));
+				Object obj = section.get(column.value());
+				if (!(obj instanceof List<?>)) {
+					obj = convertFromDB(field.getType(), obj);
+				}
+				field.set(object, obj);
 			}
-			return t;
+			return object;
 		} catch (IllegalArgumentException e) {
 			throw e;
 		} catch (Throwable e) {

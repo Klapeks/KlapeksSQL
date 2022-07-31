@@ -1,5 +1,6 @@
 package com.klapeks.sql;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -12,6 +13,7 @@ import java.util.Properties;
 
 import com.klapeks.sql.anno.Column;
 import com.klapeks.sql.anno.Limit;
+import com.klapeks.sql.anno.Nullable;
 import com.klapeks.sql.anno.Primary;
 import com.klapeks.sql.anno.PrimaryConstraint;
 import com.klapeks.sql.anno.Table;
@@ -54,6 +56,14 @@ public class MatSQL extends Database {
             throw new RuntimeSQLException(e);
         }
 	}
+	
+	int getLimit(Field field, DataType<?> dt) {
+		try {
+			return field.getAnnotation(Limit.class).value();
+		} catch (Throwable t) {
+			return dt.defaultLimit();
+		}
+	}
 
 	@Override
 	public void createTable(Class<?> table) {
@@ -69,22 +79,23 @@ public class MatSQL extends Database {
 			query.append("`");
 			query.append(column.value());
 			query.append("` ");
-			if (field.getType() == Integer.class) query.append("INT");
-			if (field.getType() == Long.class) query.append("BIGINT");
-			if (field.getType() == int.class) query.append("INT");
-			if (field.getType() == long.class) query.append("BIGINT");
-			if (field.getType() == String.class) {
-				Limit limit = field.getAnnotation(Limit.class);
-				if (limit!=null) {
-					query.append("VARCHAR(");
-					query.append(limit.value());
-					query.append(")");
-				} else query.append("TEXT");
+			DataType<?> datatype = getConverter(field.getType());
+			if (datatype==null) {
+				if (field.getType().isAssignableFrom(List.class)) {
+					datatype = getConverter(List.class);
+				}
+				throw new RuntimeException("Can't get converter for " + field.getType());
 			}
-			else if (field.getType().isAssignableFrom(List.class)) {
-				query.append("TEXT");
+			int limit = getLimit(field, datatype);
+			query.append(datatype.getSqlType(limit));
+			if (limit > 0) {
+				query.append("(");
+				query.append(limit);
+				query.append(")");
 			}
-			query.append(" NOT NULL");
+			query.append(" ");
+			if (field.getAnnotation(Nullable.class) != null) query.append("NULL");
+			else query.append("NOT NULL");
 		}
 		query.append(" );");
 		try {
@@ -156,7 +167,7 @@ public class MatSQL extends Database {
 				index++;
 				try {
 					field.setAccessible(true);
-					st.setObject(index, convertTo(field.get(object)));
+					st.setObject(index, convertToDB(field.get(object)));
 				} catch (Throwable e) {
 					e.printStackTrace();
 				}
@@ -188,7 +199,7 @@ public class MatSQL extends Database {
 				query.append("`");
 				query.append(column.value());
 				query.append("` = ?");
-				placeholders.add(convertTo(a));
+				placeholders.add(convertToDB(a));
 			} catch (Throwable e) {
 				e.printStackTrace();
 			}
@@ -202,7 +213,7 @@ public class MatSQL extends Database {
 			PreparedStatement st = connection.prepareStatement(query.toString());
 			index = 0;
 			for (Object o : placeholders) {
-				st.setObject(++index, o);
+				st.setObject(++index, convertToDB(o));
 			}
 			st.executeUpdate();
 		} catch (SQLException e) {
@@ -226,7 +237,7 @@ public class MatSQL extends Database {
 			PreparedStatement st = connection.prepareStatement(query.toString());
 			int index = 0;
 			for (Object o : where.placeholders) {
-				st.setObject(++index, o);
+				st.setObject(++index, convertToDB(o));
 			}
 			ResultSet result = st.executeQuery();
 			List<T> list = new ArrayList<>();
@@ -240,27 +251,46 @@ public class MatSQL extends Database {
 		}
 	}
 	
+	@Override
+	public boolean hasOne(Class<?> table, Where where) {
+		StringBuilder query = new StringBuilder();
+		query.append("SELECT * FROM `");
+		query.append(validTable(table).value());
+		query.append("` WHERE ");
+		query.append(where.query);
+		if (where.limit > 0) {
+			query.append(" LIMIT ");
+			query.append(where.limit);
+		}
+		try {
+			PreparedStatement st = connection.prepareStatement(query.toString());
+			int index = 0;
+			for (Object o : where.placeholders) {
+				st.setObject(++index, convertToDB(o));
+			}
+			ResultSet result = st.executeQuery();
+			return result.next();
+		} catch (SQLException e) {
+			throw new RuntimeSQLException(e);
+		}
+	}
+	
 
 
-	@SuppressWarnings("unchecked")
 	static <T> T generateFromResultSet(Class<T> clazz, ResultSet result) {
 		try {
-			T t = clazz.getConstructor().newInstance();
+			Constructor<T> constr = clazz.getConstructor();
+			constr.setAccessible(true);
+			T object = constr.newInstance();
 			for (Field field : clazz.getDeclaredFields()) {
 				Column column = field.getAnnotation(Column.class);
 				if (column==null) continue;
 				field.setAccessible(true);
-				Object o = result.getObject(column.value());
-				if (field.getType().isAssignableFrom(List.class)) {
-					String[] g = o.toString().replace("\r", "").split("\n");
-					o = new ArrayList<Object>();
-					for (String s : g) {
-						((List<Object>) o).add(s);
-					}
-				}
-				field.set(t, o);
+				Object value = result.getObject(column.value());
+				value = convertFromDB(field.getType(), value);
+				field.set(object, value);
 			}
-			return t;
+			return object;
 		} catch (Throwable e) {
 			throw new RuntimeException(e);
 		}
