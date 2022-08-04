@@ -2,8 +2,6 @@ package com.klapeks.sql;
 
 import java.util.List;
 
-import com.klapeks.db.Cfg;
-
 public class Where implements Cloneable {
 
 	String query;
@@ -14,9 +12,8 @@ public class Where implements Cloneable {
 		this.placeholders = placeholders;
 	}
 	public Where(String query, List<Object> placeholders) {
-		this(query, Cfg.toArray(placeholders));
+		this(query, toArray(placeholders));
 	}
-	
 	public String getQuery() {
 		return query;
 	}
@@ -55,5 +52,13 @@ public class Where implements Cloneable {
 	@Override
 	public int hashCode() {
 		return query.hashCode();
+	}
+	
+	private static Object[] toArray(List<Object> list) {
+		Object[] objs = new Object[list.size()];
+		for (int i = list.size() - 1; i >= 0; i--) {
+			objs[i] = list.get(i);
+		}
+		return objs;
 	}
 }

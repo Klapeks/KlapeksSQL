@@ -15,8 +15,8 @@ import com.klapeks.sql.anno.Column;
 import com.klapeks.sql.anno.Limit;
 import com.klapeks.sql.anno.Nullable;
 import com.klapeks.sql.anno.Primary;
-import com.klapeks.sql.anno.PrimaryConstraint;
 import com.klapeks.sql.anno.Table;
+import com.klapeks.sql.anno.Unique;
 
 public class MatSQL extends Database {
 
@@ -104,34 +104,6 @@ public class MatSQL extends Database {
             throw new RuntimeSQLException(e);
 		}
 		updateTable(table);
-	}
-	private void updateTable(Class<?> table) {
-		PrimaryConstraint pc = table.getAnnotation(PrimaryConstraint.class);
-		Table t = table.getAnnotation(Table.class);
-		if (pc!=null) {
-			StringBuilder query = new StringBuilder();
-			query.append("ALTER TABLE `");
-			query.append(t.value());
-			query.append("` ADD CONSTRAINT ");
-			query.append(pc.value());
-			query.append(" PRIMARY KEY ( ");
-			int index = 0;
-			for (Field field : table.getDeclaredFields()) {
-				Column column = field.getAnnotation(Column.class);
-				if (column==null) continue;
-				if (field.getAnnotation(Primary.class)==null) continue;
-				if (index++ > 0) query.append(" , ");
-				query.append("`");
-				query.append(column.value());
-				query.append("`");
-			}
-			query.append(" );");
-			try {
-				this.connection.prepareStatement(query.toString()).executeUpdate();
-			} catch (SQLException e) {
-	            throw new RuntimeSQLException(e);
-			}
-		}
 	}
 
 	@Override
@@ -295,4 +267,93 @@ public class MatSQL extends Database {
 			throw new RuntimeException(e);
 		}
 	}
+	
+	private void updateTable(Class<?> table) {
+		StringBuilder query = new StringBuilder();
+		query.append("ALTER TABLE `");
+		query.append(validTable(table).value());
+		query.append("` ");
+		
+		int index = 0;
+		StringBuilder primaryKeys = null;
+		for (Field field : table.getDeclaredFields()) {
+			Column column = field.getAnnotation(Column.class);
+			if (column==null) continue;
+
+			if (field.getAnnotation(Primary.class)!=null) {
+				if (primaryKeys!=null) primaryKeys.append(", ");
+				else primaryKeys = new StringBuilder();
+				primaryKeys.append("`");
+				primaryKeys.append(column.value());
+				primaryKeys.append("`");
+			}
+			Unique unique = field.getAnnotation(Unique.class);
+			if (unique!=null) {
+				if (index++ > 0) query.append(", ");
+				String val = unique.value();
+				if (val==null||val.isEmpty()) val = column.value();
+				query.append("ADD UNIQUE KEY `");
+				query.append(unique.value().isEmpty() ? column.value() : unique.value());
+				query.append("` (`");
+				query.append(column.value());
+				query.append("`)");
+			}
+		}
+		if (primaryKeys == null && index <= 0) return;
+		if (primaryKeys!=null) {
+			if (index++ > 0) query.append(", ");
+			query.append("ADD PRIMARY KEY (");
+			query.append(primaryKeys);
+			query.append(")");
+		}
+		System.out.println(query);
+		try {
+			this.connection.prepareStatement(query.toString()).executeUpdate();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+	}
+//	public void alterTalbe(Class<?> table, String query) {
+//		try {
+//			StringBuilder sb = new StringBuilder();
+//			sb.append("ALTER TABLE `");
+//			sb.append(validTable(table).value());
+//			sb.append("` ");
+//			sb.append(query);
+//			this.connection.prepareStatement(sb.toString()).executeUpdate();
+//		} catch (SQLException e) {
+//			// TODO Auto-generated catch block
+//			e.printStackTrace();
+//		}
+//	}
+//	private boolean updatePrimaryConstraint(Class<?> table) {
+//		Table t = validTable(table);
+//		PrimaryConstraint pc = table.getAnnotation(PrimaryConstraint.class);
+//		if (pc==null) return false;
+//
+//		StringBuilder query = new StringBuilder();
+//		query.append("ALTER TABLE `");
+//		query.append(t.value());
+//		query.append("` ADD CONSTRAINT ");
+//		query.append(pc.value());
+//		query.append(" PRIMARY KEY ( ");
+//		int index = 0;
+//		for (Field field : table.getDeclaredFields()) {
+//			Column column = field.getAnnotation(Column.class);
+//			if (column==null) continue;
+//			if (field.getAnnotation(Primary.class)==null) continue;
+//			if (index++ > 0) query.append(" , ");
+//			query.append("`");
+//			query.append(column.value());
+//			query.append("`");
+//		}
+//		query.append(" );");
+//		try {
+//			this.connection.prepareStatement(query.toString()).executeUpdate();
+//			return true;
+//		} catch (SQLException e) {
+//            throw new RuntimeSQLException(e);
+//		}
+//	
+//	}
 }
