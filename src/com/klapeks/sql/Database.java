@@ -132,6 +132,27 @@ public abstract class Database {
 				return e.name();
 			}
 		});
+		addConverter(ObjectID.class, new DataType<ObjectID>() {
+			@Override
+			public String getSqlType(int limit) {
+				return "VARCHAR";
+			}
+			public int defaultLimit() {
+				return 16;
+			};
+			@Override
+			public Class<ObjectID> getTypeClass() {
+				return ObjectID.class;
+			}
+			@Override
+			public ObjectID convertFromDB(Object objectFromDataBase) {
+				return new ObjectID(objectFromDataBase.toString());
+			}
+			@Override
+			public Object convertToDB(ObjectID objectThatWillBeSavedInDB) {
+				return objectThatWillBeSavedInDB.hexID();
+			}
+		});
 	}
 
 	@SuppressWarnings("unchecked")
@@ -180,6 +201,7 @@ public abstract class Database {
 		properties.setProperty("user", username);
 		properties.setProperty("password", password);
 		properties.setProperty("characterEncoding", "utf8");
+		properties.setProperty("autoReconnect", "true");
 		connect(path, properties);
 	}
 	public abstract void disconnect();
@@ -207,6 +229,7 @@ public abstract class Database {
 		update(object, where);
 	}
 	public void updateOrInsert(Object object) {
+		if (object==null) return;
 		validTable(object);
 		updateOrInsert(object, generateWhere(object));
 	}

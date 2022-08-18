@@ -45,13 +45,19 @@ public class MatSQL extends Database {
 	@Override
 	public boolean checkIfTableExists(Class<?> table) {
 		try {
-			Table t = table.getAnnotation(Table.class);
-            String query = "SELECT count(*) FROM information_schema.tables WHERE table_name = '" 
-            		+ t.value() + "' AND table_schema = '" + connection.getCatalog() + "' LIMIT 1;";
-            ResultSet rs = this.connection.prepareStatement(query).executeQuery();
-            int records = 0;
-            if (rs.next()) records = rs.getInt(1);
-            return records > 0;
+			StringBuilder query = new StringBuilder();
+			query.append("SELECT count(*) FROM information_schema.tables");
+			if (table != null) {
+				Table t = table.getAnnotation(Table.class);
+				query.append(" WHERE table_name = '");
+				query.append(t.value());
+				query.append("' AND table_schema = '");
+				query.append(connection.getCatalog());
+				query.append("' LIMIT 1;");
+			}
+            ResultSet rs = this.connection.prepareStatement(query.toString()).executeQuery();
+            if (!rs.next()) return false;
+            return rs.getInt(1) > 0;
         } catch (SQLException e) {
             throw new RuntimeSQLException(e);
         }
