@@ -12,11 +12,8 @@ import java.util.List;
 import java.util.Properties;
 
 import com.klapeks.sql.anno.Column;
-import com.klapeks.sql.anno.Limit;
 import com.klapeks.sql.anno.Nullable;
-import com.klapeks.sql.anno.Primary;
 import com.klapeks.sql.anno.Table;
-import com.klapeks.sql.anno.Unique;
 
 public class MatSQL extends Database {
 
@@ -64,52 +61,7 @@ public class MatSQL extends Database {
 	}
 	
 	int getLimit(Field field, DataType<?> dt) {
-		try {
-			return field.getAnnotation(Limit.class).value();
-		} catch (Throwable t) {
-			return dt.defaultLimit();
-		}
-	}
-
-	@Override
-	public void createTable(Class<?> table) {
-		StringBuilder query = new StringBuilder();
-		query.append("CREATE TABLE `");
-		query.append(table.getAnnotation(Table.class).value());
-		query.append("` ( ");
-		int index = 0;
-		for (Field field : table.getDeclaredFields()) {
-			Column column = field.getAnnotation(Column.class);
-			if (column==null) continue;
-			if (index++>0) query.append(" , ");
-			query.append("`");
-			query.append(column.value());
-			query.append("` ");
-			DataType<?> datatype = getConverter(field.getType());
-			if (datatype==null) {
-				if (field.getType().isAssignableFrom(List.class)) {
-					datatype = getConverter(List.class);
-				}
-				throw new RuntimeException("Can't get converter for " + field.getType());
-			}
-			int limit = getLimit(field, datatype);
-			query.append(datatype.getSqlType(limit));
-			if (limit > 0) {
-				query.append("(");
-				query.append(limit);
-				query.append(")");
-			}
-			query.append(" ");
-			if (field.getAnnotation(Nullable.class) != null) query.append("NULL");
-			else query.append("NOT NULL");
-		}
-		query.append(" );");
-		try {
-			this.connection.prepareStatement(query.toString()).executeUpdate();
-		} catch (SQLException e) {
-            throw new RuntimeSQLException(e);
-		}
-		updateTable(table);
+		return ColumnSchema.getLimit(field, dt);
 	}
 
 	@Override
@@ -273,51 +225,119 @@ public class MatSQL extends Database {
 			throw new RuntimeException(e);
 		}
 	}
-	
-	private void updateTable(Class<?> table) {
+
+	@Override
+	public void createTable(Class<?> table) {
 		StringBuilder query = new StringBuilder();
-		query.append("ALTER TABLE `");
-		query.append(validTable(table).value());
-		query.append("` ");
-		
+		query.append("CREATE TABLE `");
+		query.append(table.getAnnotation(Table.class).value());
+		query.append("` ( ");
 		int index = 0;
-		StringBuilder primaryKeys = null;
 		for (Field field : table.getDeclaredFields()) {
 			Column column = field.getAnnotation(Column.class);
 			if (column==null) continue;
-
-			if (field.getAnnotation(Primary.class)!=null) {
-				if (primaryKeys!=null) primaryKeys.append(", ");
-				else primaryKeys = new StringBuilder();
-				primaryKeys.append("`");
-				primaryKeys.append(column.value());
-				primaryKeys.append("`");
+			if (index++>0) query.append(" , ");
+			query.append("`");
+			query.append(column.value());
+			query.append("` ");
+			DataType<?> datatype = DataConverter.getConverter(field.getType());
+			if (datatype==null) {
+				if (field.getType().isAssignableFrom(List.class)) {
+					datatype = DataConverter.getConverter(List.class);
+				}
+				throw new RuntimeException("Can't get converter for " + field.getType());
 			}
-			Unique unique = field.getAnnotation(Unique.class);
-			if (unique!=null) {
-				if (index++ > 0) query.append(", ");
-				String val = unique.value();
-				if (val==null||val.isEmpty()) val = column.value();
-				query.append("ADD UNIQUE KEY `");
-				query.append(unique.value().isEmpty() ? column.value() : unique.value());
-				query.append("` (`");
-				query.append(column.value());
-				query.append("`)");
+			int limit = getLimit(field, datatype);
+			query.append(datatype.getSqlType(limit));
+			if (limit > 0) {
+				query.append("(");
+				query.append(limit);
+				query.append(")");
 			}
+			query.append(" ");
+			if (field.getAnnotation(Nullable.class) != null) query.append("NULL");
+			else query.append("NOT NULL");
 		}
-		if (primaryKeys == null && index <= 0) return;
-		if (primaryKeys!=null) {
-			if (index++ > 0) query.append(", ");
-			query.append("ADD PRIMARY KEY (");
-			query.append(primaryKeys);
-			query.append(")");
-		}
-		System.out.println(query);
+		query.append(" );");
 		try {
 			this.connection.prepareStatement(query.toString()).executeUpdate();
 		} catch (SQLException e) {
-			e.printStackTrace();
+            throw new RuntimeSQLException(e);
 		}
+		updateTable(table);
+	}
+	
+	@Override
+	public void updateTable(Class<?> table) {
+		StringBuilder query = new StringBuilder();
+		appendF(query, "ALTER TABLE `?`", validTable(table).value());
+		
+		List<ColumnSchema> columnsNow = new ArrayList<>();
+		try {
+			PreparedStatement st = connection.prepareStatement("SELECT * FROM INFORMATION_SCHEMA.COLUMNS "
+					+ "WHERE TABLE_NAME = '"+validTable(table).value()+"'");
+			ResultSet result = st.executeQuery();
+			while (result.next()) columnsNow.add(new ColumnSchema(result));
+		} catch (SQLException e) {
+			throw new RuntimeSQLException(e);
+		}
+		int index = 0;
+		StringBuilder primaryKeys = null;
+		String lastColumn = columnsNow.get(columnsNow.size()-1).name;
+		for (Field field : table.getDeclaredFields()) {
+			ColumnSchema ocs = new ColumnSchema(field);
+			if (columnsNow.contains(ocs)) continue;
+			ColumnSchema dbcs = get(columnsNow, ocs.name);
+			if (dbcs==null) {
+				appendF(query, " ADD `?` ?", ocs.name,  ocs.type);
+				query.append(ocs.isNullable ? " NULL" : " NOT NULL");
+				appendF(query, " AFTER `?`,", lastColumn);
+				lastColumn = ocs.name;
+				index++;
+			}
+			if ((dbcs==null || !dbcs.isPrimary) && ocs.isPrimary) {
+				if (primaryKeys!=null) primaryKeys.append(", ");
+				else primaryKeys = new StringBuilder();
+				appendF(primaryKeys, "`?`", ocs.name);
+				index++;
+			}
+			if ((dbcs==null || !dbcs.isUnique) && ocs.isUnique) {
+				appendF(query, " ADD UNIQUE KEY `?` (`?`),", ocs.name, ocs.name);
+				index++;
+			}
+			if (dbcs!=null && !dbcs.type.equals(ocs.type)) {
+				if (dbcs.type.equals("INT(11)") && ocs.type.equals("INT")) continue;
+				appendF(query, " CHANGE `?` `?`", ocs.name, ocs.name);
+				appendF(query, " ?", ocs.type);
+				query.append(ocs.isNullable ? " NULL" : " NOT NULL");
+				query.append(",");
+				index++;
+			}
+		}
+		
+		if (index <= 0) return;
+		if (primaryKeys!=null) appendF(query, " ADD PRIMARY KEY (?),", primaryKeys);
+		try {
+			String s = query.toString();
+			s = s.substring(0, s.length()-1);
+			System.out.println(index + " - " + s);
+			this.connection.prepareStatement(s).executeUpdate();
+		} catch (SQLException e) {
+			throw new RuntimeSQLException(e);
+		}
+	}
+
+	private ColumnSchema get(List<ColumnSchema> list, String name) {
+		for (ColumnSchema cs : list) { 
+			if (cs.name.equals(name)) return cs;
+		}
+		return null;
+	}
+	private void appendF(StringBuilder sb, String str, Object... placeholders) {
+		for (int i = 0; i < placeholders.length; i++) {
+			str = str.replaceFirst("\\?", placeholders[i].toString());
+		}
+		sb.append(str);
 	}
 //	public void alterTalbe(Class<?> table, String query) {
 //		try {
